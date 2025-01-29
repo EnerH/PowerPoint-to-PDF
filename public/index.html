@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!-- node server.js -->
+<html>
+  <head>
+    <title>PPT to PDF Converter</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Convert PowerPoint to PDF</h1>
+      <input type="file" id="pptFile" accept=".ppt,.pptx" />
+      <button onclick="uploadFile()">Convert to PDF</button>
+      <div id="status"></div>
+    </div>
+
+    <script>
+      async function uploadFile() {
+        const fileInput = document.getElementById("pptFile");
+        const status = document.getElementById("status");
+
+        if (!fileInput.files[0]) {
+          status.innerHTML = "Please select a file";
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("ppt", fileInput.files[0]);
+
+        try {
+          status.innerHTML = "Converting...";
+
+          const response = await fetch("/convert", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) throw new Error("Conversion failed");
+
+          const blob = await response.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = downloadUrl;
+          a.download =
+            fileInput.files[0].name.replace(/\.[^/.]+$/, "") + ".pdf";
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          status.innerHTML = "Conversion successful!";
+        } catch (error) {
+          status.innerHTML = "Error: " + error.message;
+        }
+      }
+    </script>
+  </body>
+</html>
