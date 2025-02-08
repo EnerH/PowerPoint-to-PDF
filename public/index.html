@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- node server.js -->
 <html>
   <head>
     <title>PPT to PDF Converter</title>
@@ -7,7 +8,7 @@
   <body>
     <div class="container">
       <h1>Convert PowerPoint to PDF</h1>
-      <input type="file" id="pptFile" accept=".ppt,.pptx" />
+      <input type="file" id="pptFile" accept=".ppt,.pptx" multiple />
       <button onclick="uploadFile()">Convert to PDF</button>
       <div id="status"></div>
     </div>
@@ -16,14 +17,17 @@
       async function uploadFile() {
         const fileInput = document.getElementById("pptFile");
         const status = document.getElementById("status");
+        const files = fileInput.files;
 
-        if (!fileInput.files[0]) {
-          status.innerHTML = "Please select a file";
+        if (files.length === 0) {
+          status.innerHTML = "Please select files";
           return;
         }
 
         const formData = new FormData();
-        formData.append("ppt", fileInput.files[0]);
+        for (const file of files) {
+          formData.append("ppt", file);
+        }
 
         try {
           status.innerHTML = "Converting...";
@@ -33,14 +37,13 @@
             body: formData,
           });
 
-          if (!response.ok) throw new Error("Conversion failed");
+          if (!response.ok) throw new Error(await response.text());
 
           const blob = await response.blob();
           const downloadUrl = window.URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = downloadUrl;
-          a.download =
-            fileInput.files[0].name.replace(/\.[^/.]+$/, "") + ".pdf";
+          a.download = "converted.zip";
           document.body.appendChild(a);
           a.click();
           window.URL.revokeObjectURL(downloadUrl);

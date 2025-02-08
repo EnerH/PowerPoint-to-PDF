@@ -3,6 +3,7 @@ const fileUpload = require("express-fileupload");
 const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const archiver = require("archiver");
 
 const app = express();
 
@@ -14,43 +15,92 @@ app.use(express.static("public"));
 
 app.post("/convert", async (req, res) => {
   if (!req.files?.ppt) {
-    return res.status(400).send("No file uploaded");
+    return res.status(400).send("No files uploaded");
   }
 
-  const pptFile = req.files.ppt;
-  const uploadPath = path.join(__dirname, "uploads", pptFile.name);
+  const pptFiles = Array.isArray(req.files.ppt)
+    ? req.files.ppt
+    : [req.files.ppt];
+  const uploadDir = path.join(__dirname, "uploads");
   const outputDir = path.join(__dirname, "converted");
+  let uploadedFilesInfo = [];
 
   try {
-    await pptFile.mv(uploadPath);
+    // Create directories if they don't exist
+    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
 
-    // Modified conversion command for macOS
-    const command = `"${LIBREOFFICE_PATH}" --headless --convert-to pdf --outdir "${outputDir}" "${uploadPath}"`;
+    // Move all files to upload directory with unique names
+    for (const pptFile of pptFiles) {
+      const uniqueName =
+        Date.now() +
+        "-" +
+        Math.random().toString(36).substr(2, 9) +
+        "-" +
+        pptFile.name;
+      const uploadPath = path.join(uploadDir, uniqueName);
+      await pptFile.mv(uploadPath);
+      uploadedFilesInfo.push({
+        originalName: pptFile.name,
+        uploadPath: uploadPath,
+        pdfName:
+          path.basename(pptFile.name, path.extname(pptFile.name)) + ".pdf",
+        uniquePdfName:
+          path.basename(uniqueName, path.extname(uniqueName)) + ".pdf",
+      });
+    }
 
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error("Conversion Error:", error);
-        console.error("stderr:", stderr);
-        return res.status(500).send("Conversion failed");
+    // Convert all files
+    const command = `"${LIBREOFFICE_PATH}" --headless --convert-to pdf --outdir "${outputDir}" ${uploadedFilesInfo
+      .map((f) => `"${f.uploadPath}"`)
+      .join(" ")}`;
+    await new Promise((resolve, reject) => {
+      exec(command, (error, stdout, stderr) => {
+        if (error) {
+          console.error("Conversion Error:", error);
+          console.error("stderr:", stderr);
+          reject(new Error("Conversion failed"));
+          return;
+        }
+        resolve();
+      });
+    });
+
+    // Create zip archive
+    const archive = archiver("zip");
+    res.attachment("converted.zip");
+    archive.pipe(res);
+
+    // Add PDFs to archive with original names
+    for (const fileInfo of uploadedFilesInfo) {
+      const pdfPath = path.join(outputDir, fileInfo.uniquePdfName);
+      if (fs.existsSync(pdfPath)) {
+        archive.file(pdfPath, { name: fileInfo.pdfName });
       }
+    }
 
-      const pdfFilename =
-        path.basename(uploadPath, path.extname(uploadPath)) + ".pdf";
-      const pdfPath = path.join(outputDir, pdfFilename);
+    // Finalize and send
+    await archive.finalize();
 
-      res.download(pdfPath, (err) => {
-        if (err) console.error("Download Error:", err);
-        // Cleanup with error handling
+    // Cleanup after response
+    res.on("finish", () => {
+      uploadedFilesInfo.forEach((info) => {
         try {
-          fs.unlinkSync(uploadPath);
-          fs.unlinkSync(pdfPath);
-        } catch (cleanupErr) {
-          console.error("Cleanup Error:", cleanupErr);
+          fs.unlinkSync(info.uploadPath);
+          fs.unlinkSync(path.join(outputDir, info.uniquePdfName));
+        } catch (err) {
+          console.error("Cleanup error:", err);
         }
       });
     });
   } catch (err) {
-    console.error("Upload Error:", err);
+    // Cleanup uploaded files on error
+    uploadedFilesInfo.forEach((info) => {
+      try {
+        fs.unlinkSync(info.uploadPath);
+      } catch (e) {}
+    });
+    console.error("Error:", err);
     res.status(500).send(err.message);
   }
 });
